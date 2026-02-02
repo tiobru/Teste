@@ -1,43 +1,76 @@
 from flask import Flask, render_template, request, jsonify
 import psycopg2
+from urllib.parse import urlparse
+import os
 
 app = Flask(__name__)
 
-# Configuração SIMPLES do banco - altere conforme seu setup
-DB_HOST = "localhost"
-DB_NAME = "postgres"
-DB_USER = "postgres"
-DB_PASS = "123"  # Use uma senha sem caracteres especiais
-DB_PORT = "5433"
+# 🔧 CONFIGURAÇÃO PARA RENDER + NEON
+# Usa variável de ambiente no Render, fallback para local
+DATABASE_URL = os.getenv('DATABASE_URL')
 
-def get_db():
-    """Conecta ao banco de dados"""
-    return psycopg2.connect(
-        host=DB_HOST,
-        database=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS,
-        port=DB_PORT
-    )
+def get_db_connection():
+    """Conecta ao banco de dados (Neon no Render, local em desenvolvimento)"""
+    if DATABASE_URL:
+        # Modo produção (Render + Neon)
+        try:
+            # Parse da URL do Neon
+            url = urlparse(DATABASE_URL)
+            
+            # Configuração de conexão para Neon
+            conn = psycopg2.connect(
+                database=url.path[1:],  # Remove a barra do início
+                user=url.username,
+                password=url.password,
+                host=url.hostname,
+                port=url.port or 5432,
+                sslmode='require'  # Neon requer SSL
+            )
+            print("✅ Conectado ao Neon PostgreSQL")
+            return conn
+        except Exception as e:
+            print(f"❌ Erro ao conectar ao Neon: {e}")
+            return None
+    else:
+        # Modo desenvolvimento (local)
+        try:
+            conn = psycopg2.connect(
+                host="localhost",
+                database="postgres",
+                user="postgres",
+                password="1234",
+                port="5433"
+            )
+            print("✅ Conectado ao PostgreSQL local (porta 5433)")
+            return conn
+        except Exception as e:
+            print(f"❌ Erro ao conectar localmente: {e}")
+            return None
 
 def criar_tabela():
     """Cria a tabela se não existir"""
-    conn = None
+    conn = get_db_connection()
+    if not conn:
+        print("⚠️  Não foi possível conectar para criar tabela")
+        return False
+    
     try:
-        conn = get_db()
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS clientes (
                 id SERIAL PRIMARY KEY,
                 nome VARCHAR(100),
                 email VARCHAR(100),
-                telefone VARCHAR(20)
+                telefone VARCHAR(20),
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         conn.commit()
-        print("Tabela criada/verificada") 
+        print("✅ Tabela 'clientes' criada/verificada")
+        return True
     except Exception as e:
-        print(f"Erro: {e}")
+        print(f"❌ Erro ao criar tabela: {e}")
+        return False
     finally:
         if conn:
             conn.close()
@@ -50,11 +83,13 @@ def home():
 # GET - Listar todos os clientes
 @app.route('/clientes')
 def get_clientes():
-    conn = None
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'erro': 'Falha na conexão com o banco'}), 500
+    
     try:
-        conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM clientes ORDER BY id")
+        cur.execute("SELECT * FROM clientes ORDER BY id DESC")
         rows = cur.fetchall()
         
         # Converter para dicionários
@@ -64,7 +99,8 @@ def get_clientes():
                 'id': row[0],
                 'nome': row[1],
                 'email': row[2],
-                'telefone': row[3]
+                'telefone': row[3],
+                'data_cadastro': str(row[4]) if row[4] else None
             })
         
         return jsonify(clientes)
@@ -78,9 +114,16 @@ def get_clientes():
 @app.route('/clientes', methods=['POST'])
 def add_cliente():
     data = request.json
-    conn = None
+    
+    # Validação básica
+    if not data.get('nome') or not data.get('email'):
+        return jsonify({'erro': 'Nome e email são obrigatórios'}), 400
+    
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'erro': 'Falha na conexão com o banco'}), 500
+    
     try:
-        conn = get_db()
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO clientes (nome, email, telefone) VALUES (%s, %s, %s) RETURNING id",
@@ -88,7 +131,15 @@ def add_cliente():
         )
         id_novo = cur.fetchone()[0]
         conn.commit()
-        return jsonify({'id': id_novo, 'msg': 'Cliente adicionado'})
+        
+        # Mensagem diferente para produção/desenvolvimento
+        mensagem = "Cliente adicionado ao Neon!" if DATABASE_URL else "Cliente adicionado localmente!"
+        
+        return jsonify({
+            'id': id_novo, 
+            'msg': mensagem,
+            'ambiente': 'production' if DATABASE_URL else 'development'
+        })
     except Exception as e:
         return jsonify({'erro': str(e)}), 500
     finally:
@@ -99,9 +150,15 @@ def add_cliente():
 @app.route('/clientes/<int:id>', methods=['PUT'])
 def update_cliente(id):
     data = request.json
-    conn = None
+    
+    if not data.get('nome') or not data.get('email'):
+        return jsonify({'erro': 'Nome e email são obrigatórios'}), 400
+    
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'erro': 'Falha na conexão com o banco'}), 500
+    
     try:
-        conn = get_db()
         cur = conn.cursor()
         cur.execute(
             "UPDATE clientes SET nome=%s, email=%s, telefone=%s WHERE id=%s",
@@ -118,9 +175,11 @@ def update_cliente(id):
 # DELETE - Remover cliente
 @app.route('/clientes/<int:id>', methods=['DELETE'])
 def delete_cliente(id):
-    conn = None
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'erro': 'Falha na conexão com o banco'}), 500
+    
     try:
-        conn = get_db()
         cur = conn.cursor()
         cur.execute("DELETE FROM clientes WHERE id=%s", (id,))
         conn.commit()
@@ -131,8 +190,63 @@ def delete_cliente(id):
         if conn:
             conn.close()
 
+# Rota para verificar status
+@app.route('/status')
+def status():
+    """Verifica status da aplicação e banco"""
+    conn = get_db_connection()
+    
+    status_info = {
+        'app': 'online',
+        'ambiente': 'production' if DATABASE_URL else 'development',
+        'database_url_configurada': bool(DATABASE_URL)
+    }
+    
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT version()")
+            status_info['database'] = 'online'
+            status_info['postgres_version'] = cur.fetchone()[0]
+            
+            cur.execute("SELECT COUNT(*) FROM clientes")
+            status_info['total_clientes'] = cur.fetchone()[0]
+            
+            cur.execute("SELECT current_database()")
+            status_info['database_name'] = cur.fetchone()[0]
+            
+            conn.close()
+        except Exception as e:
+            status_info['database'] = 'error'
+            status_info['database_error'] = str(e)
+    else:
+        status_info['database'] = 'offline'
+    
+    return jsonify(status_info)
+
 # Iniciar app
 if __name__ == '__main__':
+    # Criar tabela se não existir
     criar_tabela()
-    print("Servidor rodando em http://localhost:5000")
-    app.run(debug=True)
+    
+    # Configuração do servidor
+    port = int(os.getenv('PORT', 5000))
+    debug_mode = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    
+    print("=" * 50)
+    print("🚀 SISTEMA DE CADASTRO DE CLIENTES")
+    print("=" * 50)
+    
+    if DATABASE_URL:
+        print("🌐 Ambiente: PRODUÇÃO (Render + Neon)")
+        print("💾 Banco: Neon PostgreSQL na nuvem")
+    else:
+        print("💻 Ambiente: DESENVOLVIMENTO (local)")
+        print("💾 Banco: PostgreSQL local (porta 5433)")
+    
+    print(f"🔧 Porta: {port}")
+    print(f"🐛 Debug: {debug_mode}")
+    print("=" * 50)
+    
+    # Iniciar servidor
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
