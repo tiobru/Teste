@@ -1,1 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Clientes</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        .form { background: #f0f0f0; padding: 20px; margin-bottom: 20px; }
+        .form input { margin: 5px; padding: 8px; width: 200px; }
+        button { padding: 8px 15px; background: blue; color: white; border: none; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+        th { background: #eee; }
+        .btn-edit { background: orange; }
+        .btn-delete { background: red; }
+    </style>
+</head>
+<body>
+    <h1>Cadastro de Clientes</h1>
+    
+    <div class="form">
+        <input type="hidden" id="clienteId">
+        <input type="text" id="nome" placeholder="Nome">
+        <input type="email" id="email" placeholder="Email">
+        <input type="text" id="telefone" placeholder="Telefone">
+        <button onclick="salvarCliente()">Salvar</button>
+        <button onclick="limparForm()" style="background: gray;">Cancelar</button>
+    </div>
+    
+    <table id="tabela">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Nome</th>
+                <th>Email</th>
+                <th>Telefone</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
 
+    <script>
+        // Carregar clientes ao abrir a página
+        window.onload = carregarClientes;
+        
+        async function carregarClientes() {
+            const response = await fetch('/clientes');
+            const clientes = await response.json();
+            
+            const tbody = document.querySelector('#tabela tbody');
+            tbody.innerHTML = '';
+            
+            clientes.forEach(cliente => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${cliente.id}</td>
+                    <td>${cliente.nome}</td>
+                    <td>${cliente.email}</td>
+                    <td>${cliente.telefone || ''}</td>
+                    <td>
+                        <button class="btn-edit" onclick="editarCliente(${cliente.id})">Editar</button>
+                        <button class="btn-delete" onclick="excluirCliente(${cliente.id})">Excluir</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        
+        async function salvarCliente() {
+            const id = document.getElementById('clienteId').value;
+            const cliente = {
+                nome: document.getElementById('nome').value,
+                email: document.getElementById('email').value,
+                telefone: document.getElementById('telefone').value
+            };
+            
+            const url = id ? `/clientes/${id}` : '/clientes';
+            const method = id ? 'PUT' : 'POST';
+            
+            await fetch(url, {
+                method: method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(cliente)
+            });
+            
+            limparForm();
+            carregarClientes();
+        }
+        
+        async function editarCliente(id) {
+            const response = await fetch('/clientes');
+            const clientes = await response.json();
+            const cliente = clientes.find(c => c.id === id);
+            
+            if (cliente) {
+                document.getElementById('clienteId').value = cliente.id;
+                document.getElementById('nome').value = cliente.nome;
+                document.getElementById('email').value = cliente.email;
+                document.getElementById('telefone').value = cliente.telefone || '';
+            }
+        }
+        
+        async function excluirCliente(id) {
+            if (confirm('Excluir este cliente?')) {
+                await fetch(`/clientes/${id}`, {method: 'DELETE'});
+                carregarClientes();
+            }
+        }
+        
+        function limparForm() {
+            document.getElementById('clienteId').value = '';
+            document.getElementById('nome').value = '';
+            document.getElementById('email').value = '';
+            document.getElementById('telefone').value = '';
+        }
+    </script>
+</body>
+</html>
