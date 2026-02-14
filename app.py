@@ -10,29 +10,25 @@ app = Flask(__name__)
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 def get_db_connection():
-    """Conecta ao banco de dados (Neon no Render, local em desenvolvimento)"""
-    if DATABASE_URL:
-        # Modo produção (Render + Neon)
+    """Conecta ao banco (Neon na nuvem, nunca localhost em produção)"""
+    if DATABASE_URL:  # MODO PRODUÇÃO (Render)
         try:
-            # Parse da URL do Neon
             url = urlparse(DATABASE_URL)
-            
-            # Configuração de conexão para Neon
             conn = psycopg2.connect(
-                database=url.path[1:],  # Remove a barra do início
+                database=url.path[1:],
                 user=url.username,
                 password=url.password,
                 host=url.hostname,
                 port=url.port or 5432,
-                sslmode='require'  # Neon requer SSL
+                sslmode='require'  # ESSENCIAL para Neon!
             )
             print("✅ Conectado ao Neon PostgreSQL")
             return conn
         except Exception as e:
             print(f"❌ Erro ao conectar ao Neon: {e}")
             return None
-    else:
-        # Modo desenvolvimento (local)
+    else:  # MODO DESENVOLVIMENTO (seu PC local)
+        print("⚠️  Modo desenvolvimento - usando banco local")
         try:
             conn = psycopg2.connect(
                 host="localhost",
@@ -41,7 +37,7 @@ def get_db_connection():
                 password="1234",
                 port="5433"
             )
-            print("✅ Conectado ao PostgreSQL local (porta 5433)")
+            print("✅ Conectado ao PostgreSQL local")
             return conn
         except Exception as e:
             print(f"❌ Erro ao conectar localmente: {e}")
@@ -250,3 +246,4 @@ if __name__ == '__main__':
     
     # Iniciar servidor
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
+
