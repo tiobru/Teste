@@ -29,6 +29,34 @@ def home():
     return render_template('index.html')
 
 # GET - Listar todos os clientes
+
+# Rota específica para /inserir (se seu frontend usa essa URL)
+@app.route('/inserir', methods=['POST'])
+def inserir_cliente():
+    data = request.json
+    
+    if not data.get('nome') or not data.get('email'):
+        return jsonify({'erro': 'Nome e email são obrigatórios'}), 400
+    
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'erro': 'Falha na conexão com o banco'}), 500
+    
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO clientes (nome, email, telefone) VALUES (%s, %s, %s) RETURNING id",
+            (data['nome'], data['email'], data.get('telefone', ''))
+        )
+        id_novo = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({'id': id_novo, 'msg': 'Cliente adicionado com sucesso!'})
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
 @app.route('/clientes')
 def get_clientes():
     conn = get_db_connection()
@@ -156,3 +184,4 @@ def status():
 # Só executa em desenvolvimento local
 if __name__ == '__main__':
     app.run(debug=True)
+
